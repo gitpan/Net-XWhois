@@ -3,8 +3,8 @@
 ## Net::XWhois 
 ## Whois Client Interface Class. 
 ##
-## $Date: 2000/07/09 05:37:20 $
-## $Revision: 0.67 $
+## $Date: 2000/09/21 07:07:07 $
+## $Revision: 0.72 $
 ## $State: Exp $
 ## $Author: root $
 ##
@@ -14,11 +14,12 @@
 
 package Net::XWhois; 
 
+use Data::Dumper;
 use IO::Socket; 
 use Carp; 
 use vars qw ( $VERSION $AUTOLOAD ); 
 
-( $VERSION )  = '$Revision: 0.67 $' =~ /\s+(\d+\.\d+)\s+/; 
+( $VERSION )  = '$Revision: 0.72 $' =~ /\s+(\d+\.\d+)\s+/; 
 
 my $CACHE    = "/tmp/whois"; 
 my $EXPIRE   = 604800; 
@@ -63,6 +64,7 @@ my %PARSERS  = (
   name            => 'domain:\s+(\S+)\n', 
   nameservers     => 'nserver:\s+(\S+)', 
   contact_emails  => 'e-mail:\s+(\S+\@\S+)', 
+  registrants     => 'descr:\s+(.+?)\n',
  }, 
 
  RIPE_CH => { 
@@ -98,8 +100,10 @@ my %PARSERS  = (
 );
 
 my %ASSOC = (   
- 'whois.internic.net'   => [ "INTERNIC",  [ qw/com net org/ ] ],
+
+ 'whois.internic.net'   => [ "INTERNIC",  [ qw/com net org edu/ ] ],
  'whois.nic.gov'        => [ "INTERNIC",  [ qw/gov/ ] ],
+ 'whois.nic.mil'        => [ "INTERNIC",  [ qw/mil/ ] ],
  'whois.isi.edu'        => [ "INTERNIC",  [ qw/us/  ] ],
  'whois.nic.net.sg'     => [ "RIPE",      [ qw/sg/  ] ],
  'whois.aunic.net'      => [ "RIPE",      [ qw/au/  ] ],  
@@ -126,7 +130,9 @@ my %ASSOC = (
 
 
 my %ARGS = (
-    'whois.nic.ad.jp' => '/e',
+    'whois.nic.ad.jp'            => { 'S' => '/e' },
+    'whois.internic.net'         => { 'P' => '=' },
+    'whois.networksolutions.com' => { 'P' => '=' },
 ); 
 
 
@@ -164,7 +170,7 @@ sub register_cache {
 sub guess_server_details { 
 
     my ( $self, $domain ) = @_;
-    $domain =~ y/A-Z/a-z/;
+    $domain = lc $domain;
 
     my ( $server, $parser ); 
     my ( $Dserver, $Dparser ) = 
@@ -216,7 +222,7 @@ sub personality {
         ( $self->{ Server }, undef ) = @$res; 
    }
 
-    unless ( $self->{ Parser }  &&  $self->{ Format } ) { 
+    unless ( $self->{ Parser } &&  $self->{ Format } ) { 
         my $res = $self->guess_server_details ( $self->{ Domain } ); 
         ( undef, $self->{ Parser } ) = @$res; 
     }
@@ -254,22 +260,31 @@ sub lookup {
     }
 
     my $server = $self->{ Server }; 
-    my $args = $self->{ _ARGS }->{ $server }; 
+    my $suffix = $self->{ _ARGS }->{ $server }->{S} || ''; 
+    my $prefix = $self->{ _ARGS }->{ $server }->{P} || ''; 
     my $sock = $self->_connect ( $self->{ Server } ); 
     return undef unless $sock;
-    print $sock $self->{ Domain }, "$args\r\n"; 
-    my $jump = $/;
-    { undef $/; $self->{  Response  } = <$sock>; }  
-    $/ = $jump;
+    print $sock $prefix , $self->{ Domain }, "$suffix\r\n"; 
+    { local $/; undef $/; $self->{  Response  } = <$sock>; }  
     undef $sock;
 
     my $fw = eval { $self->forwardwhois };
+
+    my @fwa = ();      
+    if ($fw =~ m/\n/) {
+        @fwa = $self->{ Response} =~ 
+        m/\s+$self->{ Domain }\n.*?\n*?\s*?.*?Whois Server: (.*?)(?=\n)/isg;
+        $fw = shift @fwa;
+		return undef unless (length($fw) > 0); # pattern not found
+            return undef if ($self->{ Server } eq $fw); #avoid infinite loop
+    }       
     if ( $fw ne "" ) { 
+        $self->personality( Format => $self->{_ASSOC}->{$fw}->[0]);
         $self->{ Server } = $fw; $self->{ Response } = "";
         $self->lookup(); 
     }
 
-    if ( -d $cache ) { 
+    if ( (-d $cache) && (!($self->{Nocache})) ) { 
         open D, "> $cache/$domain" || return; 
         print D $self->{ Response }; 
         close D; 
@@ -285,9 +300,17 @@ sub AUTOLOAD {
     return undef unless $self->{ Response }; 
 
     my $key = $AUTOLOAD; $key =~ s/.*://; 
-    croak "Method $key not defined." unless exists ${$self->{ Parser }}{$key};  
 
-    my @matches = $self->{ Response } =~ /${ $self->{ Parser } }{ $key }/sg; 
+    croak "Method $key not defined." unless exists ${$self->{ Parser }}{$key};
+
+    my @matches = ();
+
+    if ( ref(${$self->{ Parser } }{ $key }) !~ /^CODE/  ) {
+	@matches = $self->{ Response } =~ /${ $self->{ Parser } }{ $key }/sg; 
+    } else {
+        @matches = &{ $self->{ Parser }{$key}}($self->response);
+    }
+ 
     my @tmp = split /\n/, join "\n", @matches; 
     for (@tmp) { s/^\s+//; s/\s+$//; chomp };  
 
@@ -345,8 +368,8 @@ Net::XWhois - Whois Client Interface for Perl5.
 
 =head1 DESCRIPTION
 
-The Net::XWhois class provides a generic client framework for doing Whois 
-queries and parsing server response. 
+The Net::XWhois class provides a generic client framework for doing Whois
+queries and parsing server response.
 
 The class maintains an array of whois servers and associated lists of top level 
 domains they serve for transparently selecting servers appropriate 
@@ -422,7 +445,6 @@ RIPE_CH, JAPAN etc.
 
 Force XWhois to ignore the cached records. 
 
-
 =item B<Error>
 
 Determines how a network connection error is handled. By default Net::XWhois
@@ -449,22 +471,33 @@ default value is 60 seconds.
 
 =item %PARSERS
 
-An associative array that contains parsing rule-sets for various response 
-formats.  Keys of this array are format names and values are hash refs that 
-contain section labels and corresponding regex masks.  Parsers can be added and 
-extended with the register_parser() method.  Also see L<Data Instance Methods>.
+An associative array that contains parsing rule-sets for various response
+formats.  Keys of this array are format names and values are hash refs that
+contain section labels and corresponding parser code.  The parser code can
+either be a regex or a reference to a subroutine.  In the case of a
+subroutine, the whois 'response' information is available to the sub in
+$_[0].  Parsers can be added and extended with the register_parser() method.
+Also see L<Data Instance Methods>.
+ 
+  my %PARSERS  = ( 
+   INTERNIC => {    
+    contact_tech    => 'Technical Contact.*?\n(.*?)(?=\...
+    contact_zone    => 'Zone Contact.*?\n(.*?)(?=\s*\n[...
+    contact_billing => 'Billing Contact.*?\n(.*?)(?=\s*...
+    contact_emails  => \&example_email_parser
+  },
+  { etc. ... },  
+ );
 
- my %PARSERS  = ( 
-  INTERNIC => {    
-   name            => 'omain Name:\s+(\S+)', 
-   nameservers     => 'order:[\s\n]+(.*?)\n\s+(.*?)\n\n', 
-   registrant      => 'Registrant:\s*\n(.*?)\n\n',  
-   contact_admin   => 've Contact.*?\n(.*?)(?=\s*\n[^\...
-   contact_tech    => 'Technical Contact.*?\n(.*?)(?=\...
-   contact_zone    => 'Zone Contact.*?\n(.*?)(?=\s*\n[...
-   contact_billing => 'Billing Contact.*?\n(.*?)(?=\s*...
-   contact_emails  => '(\S+\@\S+)', 
-  },  
+ sub example_email_parser {
+
+     # Note that the default internal implemenation for
+     # the INTERNIC parser is not a user-supplied code
+     # block.  This is just an instructive example.
+      
+     my @matches = $_[0] =~ /(\S+\@\S+)/sg; 
+     return @matches;
+ }
 
 See XWhois.pm for the complete definition of %PARSERS. 
 
@@ -499,9 +532,11 @@ false/not specified.
     Retain => 1, 
     Parser => { 
         creation_time => 'created on (\S*?)\.\n', 
+        some_randome_entity => \&random_entity_subroutine
     }; 
-
-
+ 
+Instructions on how to create a workable random_entity_subroutine
+are availabe in the I<%PARSERS> description, above.
 
 =item register_association() 
 
@@ -605,21 +640,37 @@ new().
 
 =head1 EXAMPLES
 
-Look at example programs that come with this package. "whois" is a replacement
-for the standard RIPE/InterNIC whois client. "creation" overrides the Parser 
-value at object init and gets the Creation Time of an InterNIC domain. 
-"creation2" does the same thing but by extending the Class Parser instead.
-"contacts" queries and prints information about domain's Tech/Billing/Admin 
-contacts.  
+Look at example programs that come with this package.  "whois" is a
+replacement for the standard RIPE/InterNIC whois client.  "creation"
+overrides the Parser value at object init and gets the Creation Time of an
+InterNIC domain.  "creation2" does the same thing by extending the Class
+Parser.  "contacts" queries and prints information about domain's
+Tech/Billing/Admin contacts.
+
+contribs/ containts parsers for serveral whois servers, which have not been
+patched into the module.
 
 =head1 AUTHOR
 
 Vipul Ved Prakash <mail@vipul.net>
 
+=head1 THANKS
+
+Curt Powell <curt.powell@sierraridge.com>, Matt Spiers <matt@pavilion.net>,
+Richard Dice <rdice@pobox.com>, Robert Chalmers <robert@chalmers.com.au> for
+patches, bug-reports and many cogent suggestions.
+
+=head1 MAILING LIST
+
+Net::XWhois development has moved to the sourceforge mailing,
+xwhois-devel@lists.sourceforge.net.  Please send all Net::XWhois related
+communication directly to the list address.  The subscription interface is
+at: http://lists.sourceforge.net/mailman/listinfo/xwhois-devel
+
 =head1 COPYRIGHT
 
-Copyright (c) 1998 Vipul Ved Prakash.  All rights reserved. This program is 
-free software; you can redistribute it and/or modify it under the same terms 
-as Perl itself. 
+Copyright (c) 1998-2000 Vipul Ved Prakash.  All rights reserved.  This
+program is free software; you can redistribute it and/or modify it under the
+same terms as Perl itself.
 
 

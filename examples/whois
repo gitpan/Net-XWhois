@@ -3,14 +3,12 @@
 use Getopt::Std ;
 use Net::XWhois; 
 
-getopts('neh:', \%opts);  
+getopts('nerh:', \%opts);  
 my $whois = new Net::XWhois Domain => shift,
                             Server => $opts{h};
 
 if ( $opts{e} ) { my @emails = $whois->contact_emails; $" = ", "; print "Contacts: @emails\n";  exit }
 if ( $opts{n} ) { my @emails = $whois->nameservers; $" = ", "; print "Nameservers: @emails\n";  exit }
+if ( $opts{r} ) { my @emails = $whois->registrants; $" = ", "; print "Registrants: @emails\n";  exit }
 print $whois->response;
-
-
-
 
