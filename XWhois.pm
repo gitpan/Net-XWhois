@@ -3,8 +3,8 @@
 ## Net::XWhois 
 ## Whois Client Interface Class. 
 ##
-## $Date: 1999/12/11 00:50:47 $
-## $Revision: 0.61 $
+## $Date: 1999/12/11 22:42:37 $
+## $Revision: 0.62 $
 ## $State: Exp $
 ## $Author: root $
 ##
@@ -18,7 +18,7 @@ use IO::Socket;
 use Carp; 
 use vars qw ( $VERSION $AUTOLOAD ); 
 
-( $VERSION )  = '$Revision: 0.61 $' =~ /\s+(\d+\.\d+)\s+/; 
+( $VERSION )  = '$Revision: 0.62 $' =~ /\s+(\d+\.\d+)\s+/; 
 
 my $CACHE    = "/tmp/whois"; 
 my $EXPIRE   = 604800; 
@@ -72,30 +72,44 @@ my %PARSERS  = (
   name            => 'omain Name:\s+(\S+)', 
   registrant      => '^(\S+) \(\S+?DOM)',
   contact_emails  => '(\S+\@\S+)',
-  nameservers     => 'main servers in listed order:[\s\n]+\%see\-also\s+\.(\S+?)\:',
+  nameservers     => 'servers in listed order:[\s\n]+\%see\-also\s+\.(\S+?)\:',
  },
 
  KOREA  => {
   name            => 'Domain Name\s+:\s+(\S+)',
   nameservers     => 'Host Name\s+:\s+(\S+)',
   contact_emails  => 'E\-Mail\s+:\s*(\S+\@\S+)',
+ },
+
+ GENERIC => { 
+  contact_emails  => '(\S+\@\S+)',
  }, 
+ 
 
 );
 
 my %ASSOC = (   
- 'whois.internic.net' => [ "INTERNIC",  [ qw/com net org/ ] ],
- 'whois.nic.net.sg'   => [ "RIPE",      [ qw/sg/ ] ],
- 'whois.aunic.net'    => [ "RIPE",      [ qw/au/ ] ],  
- 'whois.nic.ch'       => [ "RIPE_CH",   [ qw/ch/ ] ], 
- 'whois.nic.uk'       => [ "INTERNIC",  [ qw/uk/ ] ], 
- 'whois.nic.ad.jp'    => [ "JAPAN",     [ qw/jp/ ] ], 
- 'whois.twnic.net'    => [ "TAIWAN",    [ qw/tw/ ] ], 
- 'whois.krnic.net'    => [ "KOREA",     [ qw/kr/ ] ], 
- 'whois.ripe.net'     => [ "RIPE",      [ 
-    qw( al am at az ba be bg by ch cy cz de dk dz ee eg es fi fo fr gb 
-        ge gr hr hu ie il is it li lt lu lv ma md mk mt nl no pl pt ro ru 
-        se si sk sm su tn tr ua uk va yu ) ] ], 
+ 'whois.internic.net'   => [ "INTERNIC",  [ qw/com net org/ ] ],
+ 'whois.nic.net.sg'     => [ "RIPE",      [ qw/sg/ ] ],
+ 'whois.aunic.net'      => [ "RIPE",      [ qw/au/ ] ],  
+ 'whois.nic.ch'         => [ "RIPE_CH",   [ qw/ch/ ] ], 
+ 'whois.nic.uk'         => [ "INTERNIC",  [ qw/uk/ ] ], 
+ 'whois.nic.ad.jp'      => [ "JAPAN",     [ qw/jp/ ] ], 
+ 'whois.twnic.net'      => [ "TAIWAN",    [ qw/tw/ ] ], 
+ 'whois.krnic.net'      => [ "KOREA",     [ qw/kr/ ] ], 
+ 'whois.domainz.net.nz' => [ "GENERIC",   [ qw/nz/ ] ],
+ 'whois.ripe.net'       => [ "RIPE",      [ 
+                        qw( al am at az      ma md mk mt  
+                            ba be bg by      nl no        
+                            ch cy cz         pl pt        
+                            de dk dz         ro ru        
+                            ee eg es         se si sk sm su                       
+                            fi fo fr         tn tr 
+                            gb ge gr         ua uk
+                            hr hu ie         va
+                            il is it         yu
+                            li lt lu lv 
+                          ) ] ], 
 
 );
 
@@ -225,9 +239,9 @@ sub lookup {
     { undef $/; $self->{  Response  } = <$sock>; }  
     undef $sock;
 
-    if ( $self->forwardwhois ne "" ) { 
-        $self->{ Server } = $self->forwardwhois ();
-        $self->{ Response } = "";
+    my $fw = eval { $self->forwardwhois };
+    if ( $fw ne "" ) { 
+        $self->{ Server } = $fw; $self->{ Response } = "";
         $self->lookup(); 
     }
 
