@@ -1,14 +1,13 @@
-#!/usr/bin/perl -I../
+#!/usr/bin/perl -s
 
-use Getopt::Std ;
+use lib qw(lib/ ../lib);
 use Net::XWhois; 
 
-getopts('nerh:', \%opts);  
 my $whois = new Net::XWhois Domain => shift,
-                            Server => $opts{h};
+                            Server => $h;
 
-if ( $opts{e} ) { my @emails = $whois->contact_emails; $" = ", "; print "Contacts: @emails\n";  exit }
-if ( $opts{n} ) { my @emails = $whois->nameservers; $" = ", "; print "Nameservers: @emails\n";  exit }
-if ( $opts{r} ) { my @emails = $whois->registrants; $" = ", "; print "Registrants: @emails\n";  exit }
+if ( $e ) { my @emails = $whois->contact_emails; $" = ", "; print "Contacts: @emails\n";  exit }
+if ( $n ) { my @emails = $whois->nameservers; $" = ", "; print "Nameservers: @emails\n";  exit }
+if ( $r ) { my @emails = $whois->registrants; $" = ", "; print "Registrants: @emails\n";  exit }
 print $whois->response;
 

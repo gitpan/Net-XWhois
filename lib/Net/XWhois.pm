@@ -11,6 +11,21 @@
 ## Copyright (c) 1998, Vipul Ved Prakash.  All rights reserved.
 ## This code is free software; you can redistribute it and/or modify
 ## it under the same terms as Perl itself.
+#
+# modified August 2002 by Rob Woodard
+# 
+# Changes:
+#
+#  08/05/2002  rwoodard    Merged in changes from XWhois discussion forum on
+#                          sourceforge.net; made additional changes as needed
+#                          to implement reverse lookups of IP addresses
+#  08/06/2002  rwoodard    Added comments for internal documentation.  Added
+#                          parser defs for ARIN, set APNIC and RIPE to use RPSL.
+#  08/07/2002  rwoodard    Added ARIN-specific following of multiple netblocks;
+#                          this is done by setting the Bottom_netblock attrib
+#  08/08/2002  rwoodard    Added Verbose attribute for displaying status info
+#  08/26/2002  rwoodard    Revised ARIN parser to reflect updated responses
+#
 
 package Net::XWhois;
 
@@ -19,15 +34,130 @@ use IO::Socket;
 use Carp;
 use vars qw ( $VERSION $AUTOLOAD );
 
-$VERSION     = '0.82';
+$VERSION     = '0.90';
 
 my $CACHE    = "/tmp/whois";
 my $EXPIRE   = 604800;
-my $ERROR    = "croak";
-my $TIMEOUT  = 60;
+my $ERROR    = "return";
+my $TIMEOUT  = 20;
+my $RETRIES  = 3;
 
 my %PARSERS  = (
 
+#these are the parser definitions for each whois server.
+#the AUTOLOAD subroutine creates an object method for each key defined within
+#the server's hash of regexps; this applies the regexp to the response from
+#the whois server to extract the data.  of course you can just write your own
+#parsing subroutine as described in the docs.
+#
+#there ought to be some standardization of the fields being parsed.  for my 
+#own personal purposes only RPSL and ARIN are standardized; there needs to be
+#some work done on the other defs to get them to return at least these fields:
+#
+#  name        name of registrant entity (company or person)
+#  netname     name assigned to registrant's network
+#  inetnum     address range registered
+#  abuse_email email addresses named 'abuse@yaddayadda'
+#  gen_email   general correspondence email addresses
+#
+#yes some of these are redundant to what is already there; I saw no reason to
+#delete non-standardized keys, they don't take that much space and might be
+#needed for backwards compatibility. -rwoodard 08/2002
+ 
+ RPSL => { #updated by rwoodard 08/06/2002
+  name            => '(?:descr|owner):\s+([^\n]*)\n',
+  netname         => 'netname:\s+([^\n]*)\n',
+  inetnum         => 'inetnum:\s+([^\n]*)\n',
+  abuse_email     => '\b(?:abuse|security)\@\S+',
+  gen_email       => 'e-*mail:\s+(\S+\@\S+)',
+  
+  country         => 'country:\s+(\S+)',
+  status          => 'status:\s+([^\n]*)\n',
+  contact_admin   => '(?:admin|owner)-c:\s+([^\n]*)\n',
+  contact_tech    => 'tech-c:\s+([^\n]*)\n',
+  contact_emails  => 'email:\s+(\S+\@\S+)',
+  contact_handles => 'nic-hdl(?:-\S*):\s+([^\n]*)\n',
+  remarks         => 'remarks:\s+([^\n]*)\n',
+  notify          => 'notify:\s+([^\n]*)\n',
+  forwardwhois    => 'remarks:\s+[^\n]*(whois.\w+.\w+)',
+ },
+
+ ARIN => { #from Jon Gilbert 09/04/2000 updated/added to by rwoodard 08/07/2002
+   
+   name                 => '(?:OrgName|CustName):\s*(.*?)\n',
+   
+   netname              => 'etName:\s*(\S+)\n+',
+   inetnum              => 'etRange:\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3} - \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})[\n\s]*',
+   abuse_email          => '(?:abuse|security)\@\S+',
+   gen_email            => 'Coordinator:[\n\s]+.*?(\S+\@\S+)',
+
+   netnum               => 'Netnumber:\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})[\n\s]*',
+   hostname             => 'Hostname:\s*(\S+)[\n\s]*',
+   maintainer           => 'Maintainer:\s*(\S+)',
+   #record_update       => 'Record last updated on (\S+)\.\n+',
+   record_update        => 'Updated:(\S+)\n+',
+   database_update      => 'Database last updated on (.+)\.[\n\s]+The',
+   registrant           => '^(.*?)\n\n',
+   reverse_mapping      => 'Domain System inverse[\s\w]+:[\n\s]+(.*?)\n\n',
+   coordinator          => 'Coordinator:[\n\s]+(.*?)\n\n',
+   coordinator_handle   => 'Coordinator:[\n\s]+[^\(\)]+\((\S+?)\)',
+   coordinator_email    => 'Coordinator:[\n\s]+.*?(\S+\@\S+)',
+   address              => 'Address:\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})',
+   system               => 'System:\s+([^\n]*)\n',
+   non_portable         => 'ADDRESSES WITHIN THIS BLOCK ARE NON-PORTABLE',
+   #multiple            => 'To single out one record',
+   multiple             => '\((NET\S+)\)',
+   net_handle           => '(NET\S+)\)',
+   country              => 'Country:\s*(\S+)\n+',
+ },
+ 
+ BRNIC => {
+   name            => '(?:descr|owner):\s+([^\n]*)\n',
+   netname        => 'netname:\s+([^\n]*)\n',
+   inetnum        => 'inetnum:\s+([^\n]*)\n',
+   abuse_email    => '\b(?:abuse|security)\@\S+',
+   gen_email      => 'e-*mail:\s+(\S+\@\S+)',
+  
+   country        => 'BR', #yes this is ugly, tell BRNIC to start putting country fields in their responses
+   status          => 'status:\s+([^\n]*)\n',
+   contact_admin   => '(?:admin|owner)-c:\s+([^\n]*)\n',
+   contact_tech    => 'tech-c:\s+([^\n]*)\n',
+   contact_emails  => 'email:\s+(\S+\@\S+)',
+   contact_handles => 'nic-hdl(?:-\S*):\s+([^\n]*)\n',
+   remarks        => 'remarks:\s+([^\n]*)\n',
+   notify         => 'notify:\s+([^\n]*)\n',
+   forwardwhois   => 'remarks:\s+[^\n]*(whois.\w+.\w+)',
+ },
+ 
+ KRNIC => { #added by rwoodard 08/06/2002
+
+ },
+
+ TWNIC => { #added by rwoodard 08/06/2002
+   name                 => '^([^\n]*)\n',
+   netname              => 'etname:\s*(\S+)\n+',
+   inetnum              => 'etblock:\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3} - \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})[\n\s]*',
+   abuse_email          => '(?:abuse|security)\@\S+',
+   gen_email            => 'Coordinator:[\n\s]+.*?(\S+\@\S+)',
+
+   netnum               => 'Netnumber:\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})[\n\s]*',
+   hostname             => 'Hostname:\s*(\S+)[\n\s]*',
+   maintainer           => 'Maintainer:\s*(\S+)',
+   record_update        => 'Record last updated on (\S+)\.\n+',
+   database_update      => 'Database last updated on (.+)\.[\n\s]+The',
+   registrant           => '^(.*?)\n\n',
+   reverse_mapping      => 'Domain System inverse[\s\w]+:[\n\s]+(.*?)\n\n',
+   coordinator          => 'Coordinator:[\n\s]+(.*?)\n\n',
+   coordinator_handle   => 'Coordinator:[\n\s]+[^\(\)]+\((\S+?)\)',
+   coordinator_email    => 'Coordinator:[\n\s]+.*?(\S+\@\S+)',
+   address              => 'Address:\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})',
+   system               => 'System:\s+([^\n]*)\n',
+   non_portable         => 'ADDRESSES WITHIN THIS BLOCK ARE NON-PORTABLE',
+   multiple             => 'To single out one record',
+   net_handle           => '\((NETBLK\S+)\)',
+   country              => '\n\s+(\S+)\n\n',
+ },
+ 
  INTERNIC => {
   name            => '[\n\r\f]+\s*[Dd]omain [Nn]ame[:\.]*\s+(\S+)', 
   status          => 'omain Status[:\.]+\s+(.*?)\s*\n', 
@@ -84,19 +214,6 @@ my %PARSERS  = (
   exp_date        => 'Expiry Date\.+ ([^\n]*)\n',
   reg_date        => 'Registration Date\.+ ([^\n]*)\n',
  }, 
-
- RPSL => {
-  name            => 'Domain Name\.+:\s(\S+)',
-  status          => '(N/A)',
-  nameservers     => 'Nameserver Handle\.+:\s(\S+)',
-  registrant      => 'Registrar Handle\.+:\s(\S+)',
-  contact_admin   => 'Tech-c Handle\.+:\s(\S+)',
-  contact_tech    => 'Tech-c Handle\.+:\s(\S+)',
-  contact_zone    => 'Zone-c Handle\.+:\s(\S+)',
-  contact_billing => 'Bill-c Handle\.+:\s(\S+)',
-  contact_emails  => 'Email Address\.+:\s(\S+)',
-  contact_handles => '-c Handle\.+:\s(\S+)',
- },
 
  INTERNIC_CONTACT => {
   name            => '(.+?)\s+\(.*?\)(?:.*?\@)',
@@ -193,12 +310,33 @@ my %PARSERS  = (
   contact_emails  => 'E\-Mail\s+:\s*(\S+\@\S+)',
  },
 
+ MEXICO => {
+  name            => '[\n\r\f]+\s*[Nn]ombre del [Dd]ominio[:\.]*\s+(\S+)',
+  status          => 'omain Status[:\.]+\s+(.*?)\s*\n',
+  nameservers     => 'ameserver[^:]*:\s*([a-zA-Z0-9.\-])+',
+  registrant      => '(?:egistrant|rgani[sz]acion)[:\.]*\s*\n(.*?)\n\n',
+  contact_admin   => '(?:tacto [Aa]dministrativo|dmin Contact).*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|[\n\r\f]{2})',
+  contact_tech    => '(?:tacto [Tt]ecnico|ech Contact).*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|[\n\r\f]{2})',
+  contact_billing => 'to de Pago.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|[\n\r\f]{2})',
+  contact_emails  => '(\S+\@\S+)',
+  contact_handles => '\(([^\W\d]+\d+)\)',
+  not_registered  => 'No Encontrado',
+  reg_date        => 'de creacion[\.\:]* (.*?)\.?\n',
+  record_updated_date => 'a modificacion[\.\:]* (.*?)\.?\n',
+ },
+
+ ADAMS => {
+  name    => '(\S+) is \S*\s*registered',
+  not_registered  => 'is not registered',
+ },
+
+
+
  GENERIC => {
   contact_emails  => '(\S+\@\S+)',
  },
-
+ 
 );
-
 
 my %WHOIS_PARSER = (
     'whois.ripe.net'            => 'RPSL',
@@ -207,7 +345,7 @@ my %WHOIS_PARSER = (
     'whois.domainz.net.nz'      => 'GENERIC',
     'whois.nic.gov'             => 'INTERNIC',
     'whois.nic.ch'              => 'RIPE_CH',
-    'whois.twnic.net'           => 'TAIWAN',
+    'whois.twnic.net'           => 'TWNIC',
     'whois.internic.net'        => 'INTERNIC',
     'whois.aunic.net'           => 'RIPE',
     'whois.cdnnet.ca'           => 'CANADA',
@@ -220,6 +358,13 @@ my %WHOIS_PARSER = (
     'whois.denic.de'            => 'DENIC',
     'whois.InternetNamesWW.com' => 'INWW',
     'whois.bulkregister.com'    => 'BULKREG',
+    'whois.arin.net'            => 'ARIN', #added 08/06/2002 by rwoodard
+    'whois.apnic.net'           => 'RPSL', #added 08/06/2002 by rwoodard
+    'whois.nic.fr'              => 'RPSL',
+    'whois.lacnic.net'          => 'RPSL',
+    'whois.nic.br'              => 'BRNIC',
+    'whois.nic.mx'              => 'MEXICO',
+    'whois.adamsnames.tc'       => 'ADAMS', 
 );
 
 my %DOMAIN_ASSOC = (
@@ -237,7 +382,7 @@ my %DOMAIN_ASSOC = (
     'edu' => 'whois.internic.net',  'ee'  => 'whois.ripe.net',
     'eg'  => 'whois.ripe.net',      'es'  => 'whois.ripe.net',
     'fi'  => 'whois.ripe.net',      'fo'  => 'whois.ripe.net',
-    'fr'  => 'whois.ripe.net',
+    'fr'  => 'whois.nic.fr',
     'gb'  => 'whois.ripe.net',      'ge'  => 'whois.ripe.net',
     'gov' => 'whois.nic.gov',       'gr'  => 'whois.ripe.net',
     'hr'  => 'whois.ripe.net',      'hu'  => 'whois.ripe.net',
@@ -249,7 +394,7 @@ my %DOMAIN_ASSOC = (
     'lu'  => 'whois.ripe.net',      'lv'  => 'whois.ripe.net',
     'ma'  => 'whois.ripe.net',      'md'  => 'whois.ripe.net',
     'mil' => 'whois.nic.mil',       'mk'  => 'whois.ripe.net',
-    'mt'  => 'whois.ripe.net',
+    'mt'  => 'whois.ripe.net',      'mx'  => 'whois.nic.mx',
     'net' => 'whois.internic.net',  'nl'  => 'whois.ripe.net',
     'no'  => 'whois.norid.no',      'nz'  => 'whois.domainz.net.nz',
     'org' => 'whois.internic.net',
@@ -283,12 +428,11 @@ my %ARGS = (
     'whois.networksolutions.com' => { 'P' => '=' },
 );
 
-
 sub register_parser {
 
     my ( $self, %args ) = @_;
 
-    $self->{ _PARSERS }->{ $args{ Name } } = {} unless $args{ Retain };
+    $self->{ _PARSERS }->{ $args{ Name } } = {} unless $args{ Retain }; #set Retain to keep parser entries already present
     for ( keys %{ $args{ Parser } } ) {
         $self->{ _PARSERS }->{ $args{ Name } }->{$_} = $args{ Parser }->{$_};
     }
@@ -297,7 +441,6 @@ sub register_parser {
 
 }
 
-
 sub register_association {
 
     my ( $self, %args ) = @_;
@@ -305,13 +448,13 @@ sub register_association {
         # Update our table for looking up the whois server => parser
         $self->{ _WHOIS_PARSER }->{ $server } = $args{ $server }->[0];  # Save name of whois server and associated parser
         # Update our table of domains and their associated server
-        $self->{ _DOMAIN_ASSOC }->{ $_ } = $server for ( @{$args{ $server }}->[1]);
+        #$self->{ _DOMAIN_ASSOC }->{ $_ } = $server for ( @{$args{ $server }}->[1]);
+        $self->{ _DOMAIN_ASSOC }->{ $_ } = $server for ( @{$args{ $server }->[1]}); #from Paul Fuchs
     };
 
     return 1;
 
 }
-
 
 sub register_cache {
 
@@ -320,40 +463,42 @@ sub register_cache {
 
 }
 
-
 sub server {
      my $self = shift;
      return $self->{ Server };
 
 }
 
-
 sub guess_server_details {
 
     my ( $self, $domain ) = @_;
     $domain = lc $domain;
 
+    my $ip=$domain=~/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/; #processing an IP?
     my ( $server, $parser );
-    my ( $Dserver, $Dparser ) =
-       ( 'whois.internic.net', { %{ $self->{ _PARSERS }->{ INTERNIC } } } );
-
-    $domain =~ s/.*\.(\w+\.\w+)$/$1/;
-    $server = $self->{ _DOMAIN_ASSOC }->{ $domain };
-
-    unless ($server) { 
-        $domain =~ s/.*\.(\w+)$/$1/;
-        $server = $self->{ _DOMAIN_ASSOC }->{ $domain };
+    my ( $Dserver, $Dparser ) = 
+         $ip ? ( 'whois.arin.net', { %{ $self->{ _PARSERS }->{ ARIN } } }) :
+               ( 'whois.internic.net', { %{ $self->{ _PARSERS }->{ INTERNIC } } } ) ;
+        
+    #figure out what our server and parser should be
+    if ($ip) {
+       $server= $self->{ Server } ? $self->{ Server } : 'whois.arin.net' ;
     }
+    else {
+       $domain =~ s/.*\.(\w+\.\w+)$/$1/; #peels off the last two elements
+       $server = $self->{ _DOMAIN_ASSOC }->{ $domain };
 
+       unless ($server) { 
+          $domain =~ s/.*\.(\w+)$/$1/; #peels off the last element
+          $server = $self->{ _DOMAIN_ASSOC }->{ $domain };
+       }
+    }
     $parser = $self->{ _PARSERS }->{ $self->{ _WHOIS_PARSER }->{ $server } } if ($server);
-
+    #print "domain $domain server $server parser $parser\n";    
     return $server ? [$server, $parser] : [$Dserver, $Dparser];
-
 };
 
-
 sub new {
-
     my ( $class, %args ) = @_;
 
     my $self = {};
@@ -372,42 +517,49 @@ sub new {
 
 }
 
-
 sub personality {
-
     my ( $self, %args ) = @_;
 
-    for ( keys %args ) { chomp $args{ $_}; $self->{ $_ } = $args{ $_ } }
+    #set all attributes that were passed in
+    for ( keys %args ) {chomp $args{ $_} if defined($args{ $_}); $self->{ $_ }=$args{ $_ } }    
     $self->{ Parser } = $self->{ _PARSERS }->{ $args{ Format } }
-                        if $args{ Format };
+                        if $args{ Format }; #lets you pick an alternate parser set
 
+    #if we don't have a whois server to use, guess based on the Domain (or IP)
     unless ( $self->{ Server } ) {
         my $res = $self->guess_server_details ( $self->{ Domain } );
         ( $self->{ Server }, undef ) = @$res;
     }
 
-    unless ( $self->{ Parser } &&  $self->{ Format } ) {
+    #if there is already a Parser defined for this server, use it
+    if ( $self->{ _PARSERS }->{ $self->{ Server }}) {
+        $self->{ Parser } = $self->{ _PARSERS }->{ $self->{ Server }};
+    }
+
+    #if we still don't have a Parser to use, guess based on the Domain (or IP)
+    unless ( $self->{ Parser } ) {
         my $res = $self->guess_server_details ( $self->{ Domain } );
         ( undef, $self->{ Parser } ) = @$res;
     }
 
+    #set these if they aren't already set
     $self->{ Timeout } = $TIMEOUT unless $self->{ Timeout };
     $self->{ Error }   = $ERROR unless $self->{ Error };
-
+    $self->{ Retries } = $RETRIES unless $self->{ Retries };
 }
 
-
 sub lookup {
-
     my ( $self, %args ) = @_;
-
+    
     $self->personality ( %args );
 
     my $cache = $args{ Cache } || ${ $self->{ _CACHE } };
-    my $domain = $self->{ Domain };
-
+    $self->{ Domain }=~s/^www\.//; #trim leading www. if present; internic doesn't like it
+    print "looking up ", $self->{ Domain }, " on ", $self->{ Server }, "\n" if ($self->{ Verbose });
+    
+    #see if we already have a response in the cache, unless told not to
     unless ( $self->{ Nocache } ) {
-    READCACHE: {
+      READCACHE: {
         if ( -d $cache ) {
             last READCACHE unless -e "$cache/$domain";
             my $current = time ();
@@ -420,66 +572,105 @@ sub lookup {
             undef $/; $self->{ Response } = <D>;
             return 1;
         }
-    }
+      }
     }
 
+    #connect to whois server
     my $server = $self->{ Server };
     my $suffix = $self->{ _ARGS }->{ $server }->{S} || '';
     my $prefix = $self->{ _ARGS }->{ $server }->{P} || '';
     my $sock = $self->_connect ( $self->{ Server } );
     return undef unless $sock;
+    
+    #request whois info, then disconnect
     print $sock $prefix , $self->{ Domain }, "$suffix\r\n";
+    #print $sock $prefix , $domain, "$suffix\r\n";
     { local $/; undef $/; $self->{  Response  } = <$sock>; }
-    undef $sock;
+    close($sock); undef $sock;
 
-    my $fw = eval { $self->forwardwhois };
+    #did we get forwarded?
+    my $fw = eval { ($self->forwardwhois)[0] };
     my @fwa = ();
-    if ($fw =~ m/\n/) {
-        @fwa = $self->{ Response } =~
-        m/\s+$self->{ Domain }\n.*?\n*?\s*?.*?Whois Server: (.*?)(?=\n)/isg;
-        $fw = shift @fwa;
-        return undef unless (length($fw) > 0); # pattern not found
-        return undef if ($self->{ Server } eq $fw); #avoid infinite loop
+    
+    #if ($fw =~ m/\n/) {
+    unless (defined($fw) && $fw=~/whois/) { #if forwardwhois is a server, use it; otherwise...
+       #ARIN forwarding kludge 08/06/2002 rwoodard
+       if ( $self->{ Server } eq "whois.arin.net" ) {
+          $fw="whois.apnic.net" if ( $self->{ Response }=~/Asia Pacific Network Information (?:Center|Centre)/misg );
+          $fw="whois.ripe.net" if ( $self->{ Response }=~/European Regional Internet Registry|RIPE Network Coordination Centre/misg );
+          
+          $fw="whois.lacnic.net" if ( $self->{ Response }=~/Latin American and Caribbean IP address Regional Registry/misg );
+       }
+       
+       #APNIC forwarding kludge 08/06/2002 rwoodard
+       elsif ($self->{ Server } eq 'whois.apnic.net') {
+          $fw="whois.krnic.net" if ($self->{ Response }=~/Allocated to KRNIC/misg );
+          $fw="whois.twnic.net" if ($self->{ Response }=~/Allocated to TWNIC/misg );
+       }
+       else { #original code
+          @fwa = $self->{ Response } =~ m/\s+$self->{ Domain }\n.*?\n*?\s*?.*?Whois Server: (.*?)(?=\n)/isg;
+          $fw = shift @fwa;
+          return undef unless (defined($fw) && length($fw) > 0); # pattern not found
+       }
+        
+       return undef if (defined($fw) && $self->{ Server } eq $fw); #avoid infinite loop
     }
-    if ( $fw ne "" ) {
+    if ( defined($fw) && $fw ne "" ) {
         $self->personality( Format => $self->{_WHOIS_PARSER}->{$fw});
         return undef if ($self->{ Server } eq $fw); #avoid infinite loop
         $self->{ Server } = $fw; $self->{ Response } = "";
-        $self->lookup();
+        #$self->lookup();
+        print "   forwarded to server $fw\n" if ($self->{ Verbose });
+        $self->lookup( Server => "$fw" ); #from Paul Fuchs
     }
 
+    #are there multiple netblocks? If so, do we pursue them? (ARIN only for now)
+    if ( $self->{Server} eq 'whois.arin.net' && $self->multiple && $self->{ Bottom_netblock } && $self->net_handle ) {
+       my @netblocks=($self->net_handle);
+       my $cnt=$#netblocks;
+       #print "mult blocks, looking up ", $netblocks[$cnt], " on ", $self->{ Server }, "\n";
+       $self->{ Response } = "";
+       $self->lookup( Domain => $netblocks[$cnt], Server => $self->{ Server });
+    }
+    
+    #cache the response
     if ( (-d $cache) && (!($self->{Nocache})) ) {
         open D, "> $cache/$domain" || return;
         print D $self->{ Response };
         close D;
     }
-
+    #print "done with lookup\n";
 }
-
 
 sub AUTOLOAD {
 
     my $self = shift;
 
-    return undef unless $self->{ Response };
-    my $key = $AUTOLOAD; $key =~ s/.*://;
-    croak "Method $key not defined." unless exists ${$self->{ Parser }}{$key};
+    return undef unless $self->{ Response }; #we didn't get a response, nothing to return
+    my $key = $AUTOLOAD; 
+    $key =~ s/.*://;
 
+    #croak "Method $key not defined" unless exists ${$self->{ Parser }}{$key};
+    return undef unless exists ${$self->{ Parser }}{$key}; #don't croak(), just don't do anything
+    
     my @matches = ();
 
-    if ( ref(${$self->{ Parser } }{ $key }) !~ /^CODE/  ) {
-    @matches = $self->{ Response } =~ /${ $self->{ Parser } }{ $key }/sg;
-    } else {
-        @matches = &{ $self->{ Parser }{$key}}($self->response);
+    if ( ref(${$self->{ Parser } }{ $key }) !~ /^CODE/  ) { #not an array or hash, i.e. a regexp
+       #get everything in the response that matches the regexp; each match is an element in the array
+       @matches = $self->{ Response } =~ /${ $self->{ Parser } }{ $key }/sg;
+       #print "matches for $key: @matches\n";
+    } 
+    else { #assumes you have defined your own subroutine with register_parser, pass the whole response to it
+       @matches = &{ $self->{ Parser }{$key}}($self->response);
     }
 
     my @tmp = split /\n/, join "\n", @matches;
-    for (@tmp) { s/^\s+//; s/\s+$//; chomp };
-
+    for (@tmp) { s/^\s+//; s/\s+$//; chomp }; #trim leading/trailing whitespace and newline
+    #print "tmp: @tmp\n";
+    #depending on calling context, return an array or a newline-delimited string
     return wantarray ? @tmp :  join "\n", @tmp ;
 
 }
-
 
 sub response {
 
@@ -488,27 +679,34 @@ sub response {
 
 }
 
-
 sub _connect {
 
     my $self = shift;
     my $machine = shift;
     my $error = $self->{Error};
-
-    my $sock = new IO::Socket::INET PeerAddr => $machine,
+    my $maxtries = $self->{Retries};
+    my $sock;
+    my $retries=0;
+    
+    until ($sock || $retries == $maxtries) {
+       #print "   connecting to $machine\n";
+       $sock = new IO::Socket::INET PeerAddr => $machine,
                                     PeerPort => 'whois',
                                     Proto    => 'tcp',
-                                    Timeout  => $self->{Timeout}
-       or &$error( "[$@]" );
-
+                                    Timeout  => $self->{Timeout};
+      # or &$error( "[$@]" );
+       $retries++ unless ($sock);
+       print "try $retries failed\n" if ( $self->{ Verbose } && !$sock);
+    }
+    &$error( "[$@]" ) unless ($sock);
+    
     $sock->autoflush if $sock;
     return $sock;
-
 }
-
 
 sub ignore {}
 
+sub DESTROY {} #from Gregory Karpinsky
 
 'True Value.';
 
@@ -852,15 +1050,16 @@ Vipul Ved Prakash <mail@vipul.net>
 Curt Powell <curt.powell@sierraridge.com>, Matt Spiers
 <matt@pavilion.net>, Richard Dice <rdice@pobox.com>, Robert Chalmers
 <robert@chalmers.com.au>, Steinar Overbeck Cook <steinar@balder.no>, Steve
-Weathers <steve@domainit.com>, Robert Puettmann <rpuettmann@ipm.net>, and
-Martin H . Sluka" <martin@sluka.de> for patches, bug-reports and many
-cogent suggestions.
+Weathers <steve@domainit.com>, Robert Puettmann <rpuettmann@ipm.net>,
+Martin H . Sluka" <martin@sluka.de>, Rob Woodard <rwoodard15@attbi.com>,
+Jon Gilbert, Erik Aronesty for patches, bug-reports and many cogent
+suggestions.
 
 =head1 MAILING LIST
 
 Net::XWhois development has moved to the sourceforge mailing list,
-xwhois-devel@lists.sourceforge.net.  Please send all Net::XWhois related
-communication directly to the list address.  The subscription interface is
+xwhois-devel@lists.sourceforge.net. Please send all Net::XWhois related
+communication directly to the list address. The subscription interface is
 at: http://lists.sourceforge.net/mailman/listinfo/xwhois-devel
 
 =head1 SEE ALSO
