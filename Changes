@@ -1,15 +1,36 @@
 
 
                         CHANGELOG for Net::XWhois
-           $Id: Changes,v 1.2 2001/07/14 03:18:56 vipul Exp $
+           $Id: Changes,v 1.3 2001/07/14 07:25:30 vipul Exp $
 
 --------------------------------------------------------------------------
+
+0.81                                                         July 13, 2001
+
+  * Change the definition of TLDs to accomodate second level tlds.
+  
+  * Applied a patch by Mathh Spiers <matt@pavilion.net> that supplies
+    parsers for NOMINET (whois.nic.uk), CENTRALNIC (whois.centralnic.com)
+    and UKERNA (whois.ja.net).
+
+  * Applied a patch by Robert Puettmann <rpuettmann@ipm.net> that supplies a
+    parser for DENIC (whois.denic.de) responses.
+
+  * Applied a patch by Steve Weathers <steve@domainit.com> that enhances
+    the INTERNIC parser and supplies parsers for INWW
+    (whois.InternetNamesWW.com) and BULKREG (whois.bulkregister.com).
+
+  * Changed "registrants" in RIPE format to "registrant".
+
+  * Fixed a bug in contact_handles regex of INTERNIC parser. Thanks to
+    Martin H . Sluka" <martin@sluka.de> for the patch.
+
+
 
 0.80                                                         July 13, 2001
 
   * Steinar Overbeck Cook <steinar@balder.no> added RSPL support and split
     up the %ASSOC into two data structures to avoid ambiguous lookups.
-
 .
 .
 .
@@ -36,4 +57,3 @@
   * Wrote $self->personality()
 
   * Introduced caching.
-

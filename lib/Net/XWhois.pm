@@ -3,8 +3,8 @@
 ## Net::XWhois
 ## Whois Client Interface Class.
 ##
-## $Date: 2001/07/14 03:18:58 $
-## $Revision: 1.2 $
+## $Date: 2001/07/14 07:25:31 $
+## $Revision: 1.3 $
 ## $State: Exp $
 ## $Author: vipul $
 ##
@@ -19,7 +19,7 @@ use IO::Socket;
 use Carp;
 use vars qw ( $VERSION $AUTOLOAD );
 
-$VERSION     = '0.80';
+$VERSION     = '0.81';
 
 my $CACHE    = "/tmp/whois";
 my $EXPIRE   = 604800;
@@ -29,21 +29,61 @@ my $TIMEOUT  = 60;
 my %PARSERS  = (
 
  INTERNIC => {
-  name            => 'omain Name:\s+(\S+)',
-  status          => 'omain Status:\s+(.*?)\s*\n',
-  nameservers     => 'in listed order:[\s\n]+(\S+)\s.*?\n\s+(\S*?)\s.*?\n\n',
-  registrant      => 'Registrant:\s*\n(.*?)\n\n',
-  contact_admin   => 'nistrative Contact.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|\n\n)',
-  contact_tech    => 'Technical Contact.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|\n\n)',
-  contact_zone    => 'Zone Contact.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|\n\n)',
-  contact_billing => 'Billing Contact.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|\n\n)',
+  name            => '[\n\r\f]+\s*[Dd]omain [Nn]ame[:\.]*\s+(\S+)', 
+  status          => 'omain Status[:\.]+\s+(.*?)\s*\n', 
+  nameservers     => '[\n\r\f]+\s*([a-zA-Z0-9\-\.]+\.[a-zA-Z0-9\-]+\.[a-zA-Z\-]+)[:\s\n$]',
+  registrant      => '(?:egistrant|rgani[sz]ation)[:\.]*\s*\n(.*?)\n\n',
+  contact_admin   => '(?:dministrative Contact|dmin Contact).*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|[\n\r\f]{2})',
+  contact_tech    => '(?:echnical Contact|ech Contact).*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|[\n\r\f]{2})',
+  contact_zone    => 'one Contact.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|[\n\r\f]{2})',
+  contact_billing => 'illing Contact.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|[\n\r\f]{2})',
   contact_emails  => '(\S+\@\S+)',
-  contact_handles => '\((\w+\d+)\)',
+  contact_handles => '\(([^\W\d]+\d+)\)',
   domain_handles  => '\((\S*?-DOM)\)',
   org_handles     => '\((\S*?-ORG)\)',
   not_registered  => 'No match',
   forwardwhois    => 'Whois Server: (.*?)(?=\n)',
  },
+
+ BULKREG => {
+  name            => 'omain Name[:\.]*\s+(\S+)', 
+  status          => 'omain Status[:\.]+\s+(.*?)\s*\n',
+  nameservers     => '[\n\r\f]+\s*([a-zA-Z0-9\-\.]+\.[a-zA-Z0-9\-]+\.[a-zA-Z\-]+)[:\s\n$]',
+  registrant      => '(.+)\([\w\-]+\-DOM\).*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|[\n\r\f]{2})',
+  contact_admin   => 'dmin[a-zA-Z]*? Contact.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|[\n\r\f]{2})',
+  contact_tech    => 'ech[a-zA-Z]*? Contact.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|[\n\r\f]{2})',
+  contact_zone    => 'one Contact.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|[\n\r\f]{2})',
+  contact_billing => 'illing Contact.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|[\n\r\f]{2})',
+  contact_emails  => '(\S+\@\S+)',
+  contact_handles => '\((\w+\d+\-BR)\)',
+  domain_handles  => '\((\S*?-DOM)\)',
+  org_handles     => '\((\S*?-ORG)\)',
+  not_registered  => 'Not found\!',
+  forwardwhois    => 'Whois Server: (.*?)(?=\n)',
+  registrar       => 'egistrar\s*\w*[\.\:]* (.*?)\.?\n',
+  reg_date        => 'reated on[\.\:]* (.*?)\.?\n',
+  exp_date        => 'xpires on[\.\:]* (.*?)\.?\n',
+ },
+
+ INWW => {
+  name            => 'omain Name\.+ (\S+)',
+  status          => 'omain Status\.+ ([^\n]*)\n', 
+  nameservers     => 'Name Server\.+ (\S+)',
+  registrant      => 'Organisation \w{4,7}\.+ ([^\n]+?)\n',
+  contact_admin   => 'Admin \w{3,7}\.+ ([^\n]*)\n',
+  contact_tech    => 'Tech \w{3,7}\.+ ([^\n]*)\n',
+  contact_zone    => 'Zone \w{3,7}\.+ ([^\n]*)\n',
+  contact_billing => 'Billing \w{3,7}\.+ ([^\n]*)\n',
+  contact_emails  => '(\S+\@\S+)',
+  contact_handles => '\((\w+\d+)\)',
+  domain_handles  => '\((\S*?-DOM)\)',
+  org_handles     => '\((\S*?-ORG)\)',
+  not_registered  => 'is not registered',
+  forwardwhois    => 'Whois Server: (.*?)(?=\n)',
+  registrar       => 'egistrar\s*\w*[\.\:]* (.*?)\.?\n',
+  exp_date        => 'Expiry Date\.+ ([^\n]*)\n',
+  reg_date        => 'Registration Date\.+ ([^\n]*)\n',
+ }, 
 
  RPSL => {
   name            => 'Domain Name\.+:\s(\S+)',
@@ -56,7 +96,7 @@ my %PARSERS  = (
   contact_billing => 'Bill-c Handle\.+:\s(\S+)',
   contact_emails  => 'Email Address\.+:\s(\S+)',
   contact_handles => '-c Handle\.+:\s(\S+)',
-    },
+ },
 
  INTERNIC_CONTACT => {
   name            => '(.+?)\s+\(.*?\)(?:.*?\@)',
@@ -72,19 +112,67 @@ my %PARSERS  = (
   contact_emails  => '-Mailbox:\s+(\S+\@\S+)',
  },
 
-
  RIPE => {
   name            => 'domain:\s+(\S+)\n',
   nameservers     => 'nserver:\s+(\S+)',
   contact_emails  => 'e-mail:\s+(\S+\@\S+)',
-  registrants     => 'descr:\s+(.+?)\n',
+  registrant      => 'descr:\s+(.+?)\n',
  },
 
  RIPE_CH => {
-  name            => 'domainname:\s+(\S+)\n',
-  nameservers     => 'nserver:\s+(\S+)',
-  contact_emails  => 'e-mail:\s+(\S+\@\S+)',
+  name            => 'Domain Name:[\s\n]+(\S+)\n',
+  nameservers     => 'Name servers:[\s\n]+(\S+)[\s\n]+(\S+)',
  },
+
+ NOMINET => { 
+  name                => 'omain Name:\s+(\S+)',
+  registrant          => 'egistered For:\s*(.*?)\n',
+  ips_tag             => 'omain Registered By:\s*(.*?)\n',
+  record_updated_date => 'Record last updated on\s*(.*?)\s+',
+  record_updated_by   => 'Record last updated on\s*.*?\s+by\s+(.*?)\n',
+  nameservers         => 'listed in order:[\s\n]+(\S+)\s.*?\n\s+(\S*?)\s.*?\n\s*\n',
+  whois_updated       => 'database last updated at\s*(.*?)\n',
+ },
+
+ UKERNA  => {
+  name                => 'omain Name:\s+(\S+)',
+  registrant          => 'egistered For:\s*(.*?)\n',
+  ips_tag             => 'omain Registered By:\s*(.*?)\n',
+  record_updated_date => 'ecord updated on\s*(.*?)\s+',
+  record_updated_by   => 'ecord updated on\s*.*?\s+by\s+(.*?)\n',
+  nameservers         => 'elegated Name Servers:[\s\n]+(\S+)[\s\n]+(\S+).*?\n\s*\n',
+  contact_emails      => 'Domain contact:\s*(.*?)\n',
+ },
+
+ CENTRALNIC => { 
+  name                => 'omain Name:\s+(\S+)',
+  registrant          => 'egistrant:\s*(.*?)\n',
+  contact_admin       => 'lient Contact:\s*(.*?)\n\s*\n',
+  contact_billing     => 'illing Contact:\s*(.*?)\n\s*\n',
+  contact_tech        => 'echnical Contact:\s*(.*?)\n\s*\n',
+  record_created_date => 'ecord created on\s*(.*?)\n',
+  record_paid_date    => 'ecord paid up to\s*(.*?)\n',
+  record_updated_date => 'ecord last updated on\s*(.*?)\n',
+  nameservers         => 'in listed order:[\s\n]+(\S+)\s.*?\n\s+(\S*?)\s.*?\n\s*\n',
+  contact_emails      => '(\S+\@\S+)',
+ },
+
+ DENIC => { 
+  name            => 'domain:\s+(\S+)\n',
+  registrants     => 'descr:\s+(.+?)\n',
+  contact_admin   => 'admin-c:\s+(.*?)\s*\n',
+  contact_tech    => 'tech-c:\s+(.*?)\s*\n',
+  contact_zone    => 'zone-c:\s+(.*?)\s*\n',
+  nameservers     => 'nserver:\s+(\S+)',
+  status          => 'status:\s+(.*?)\s*\n',
+  changed         => 'changed:\s+(.*?)\s*\n',
+  source          => 'source:\s+(.*?)\s*\n',
+  person          => 'person:\s+(.*?)\s*\n',
+  address         => 'address:\s+(.+?)\n',
+  phone           => 'phone:\s+(.+?)\n',
+  fax_no          => 'fax-no:\s+(.+?)\n',
+  contact_emails  => 'e-mail:\s+(.+?)\n',
+},
 
  JAPAN => {
   name            => '\[Domain Name\]\s+(\S+)',
@@ -109,95 +197,80 @@ my %PARSERS  = (
   contact_emails  => '(\S+\@\S+)',
  },
 
-
 );
 
+
 my %WHOIS_PARSER = (
-    'whois.ripe.net'       => 'RPSL',
-    'whois.nic.mil'        => 'INTERNIC',
-    'whois.nic.ad.jp'      => 'JAPAN',
-    'whois.domainz.net.nz' => 'GENERIC',
-    'whois.nic.gov'        => 'INTERNIC',
-    'whois.nic.ch'         => 'RIPE_CH',
-    'whois.twnic.net'      => 'TAIWAN',
-    'whois.internic.net'   => 'INTERNIC',
-    'whois.nic.net.sg'     => 'RIPE',
-    'whois.aunic.net'      => 'RIPE',
-    'whois.cdnnet.ca'      => 'CANADA',
-    'whois.nic.uk'         => 'INTERNIC',
-    'whois.krnic.net'      => 'KOREA',
-    'whois.isi.edu'        => 'INTERNIC',
-    'whois.norid.no'       => 'RPSL',
+    'whois.ripe.net'            => 'RPSL',
+    'whois.nic.mil'             => 'INTERNIC',
+    'whois.nic.ad.jp'           => 'JAPAN',
+    'whois.domainz.net.nz'      => 'GENERIC',
+    'whois.nic.gov'             => 'INTERNIC',
+    'whois.nic.ch'              => 'RIPE_CH',
+    'whois.twnic.net'           => 'TAIWAN',
+    'whois.internic.net'        => 'INTERNIC',
+    'whois.aunic.net'           => 'RIPE',
+    'whois.cdnnet.ca'           => 'CANADA',
+    'whois.ja.net'              => 'UKERNA',
+    'whois.nic.uk'              => 'NOMINET',
+    'whois.krnic.net'           => 'KOREA',
+    'whois.isi.edu'             => 'INTERNIC',
+    'whois.norid.no'            => 'RPSL',
+    'whois.centralnic.com'      => 'CENTRALNIC',
+    'whois.denic.de'            => 'DENIC',
+    'whois.InternetNamesWW.com' => 'INWW',
+    'whois.bulkregister.com'    => 'BULKREG',
 );
 
 my %DOMAIN_ASSOC = (
-    'al'  => 'whois.ripe.net',
-    'am'  => 'whois.ripe.net',
-    'at'  => 'whois.ripe.net',
-    'au'  => 'whois.aunic.net',
-    'az'  => 'whois.ripe.net',
-    'ba'  => 'whois.ripe.net',
-    'be'  => 'whois.ripe.net',
-    'bg'  => 'whois.ripe.net',
-    'by'  => 'whois.ripe.net',
-    'ca'  => 'whois.cdnnet.ca',
-    'ch'  => 'whois.nic.ch',
-    'ch'  => 'whois.ripe.net',
-    'com' => 'whois.networksolutions.com',
-    'cy'  => 'whois.ripe.net',
-    'cz'  => 'whois.ripe.net',
-    'de'  => 'whois.ripe.net',
-    'dk'  => 'whois.dk-hostmaster.dk',
-    'dz'  => 'whois.ripe.net',
-    'edu' => 'whois.internic.net',
-    'ee'  => 'whois.ripe.net',
-    'eg'  => 'whois.ripe.net',
-    'es'  => 'whois.ripe.net',
-    'fi'  => 'whois.ripe.net',
-    'fo'  => 'whois.ripe.net',
+
+    'al'  => 'whois.ripe.net',      'am'  => 'whois.ripe.net',       
+    'at'  => 'whois.ripe.net',      'au'  => 'whois.aunic.net',      
+    'az'  => 'whois.ripe.net',       
+    'ba'  => 'whois.ripe.net',      'be'  => 'whois.ripe.net',       
+    'bg'  => 'whois.ripe.net',      'by'  => 'whois.ripe.net',
+    'ca'  => 'whois.cdnnet.ca',     'ch'  => 'whois.nic.ch',          
+    'com' => 'whois.internic.net',
+    'cy'  => 'whois.ripe.net',      'cz'  => 'whois.ripe.net',
+    'de'  => 'whois.denic.de',      'dk'  => 'whois.dk-hostmaster.dk',
+    'dz'  => 'whois.ripe.net', 
+    'edu' => 'whois.internic.net',  'ee'  => 'whois.ripe.net',
+    'eg'  => 'whois.ripe.net',      'es'  => 'whois.ripe.net',
+    'fi'  => 'whois.ripe.net',      'fo'  => 'whois.ripe.net',
     'fr'  => 'whois.ripe.net',
-    'gb'  => 'whois.ripe.net',
-    'ge'  => 'whois.ripe.net',
-    'gov' => 'whois.nic.gov',
-    'gr'  => 'whois.ripe.net',
-    'hr'  => 'whois.ripe.net',
-    'hu'  => 'whois.ripe.net',
-    'ie'  => 'whois.ripe.net',
-    'il'  => 'whois.ripe.net',
-    'is'  => 'whois.ripe.net',
-    'it'  => 'whois.ripe.net',
+    'gb'  => 'whois.ripe.net',      'ge'  => 'whois.ripe.net',
+    'gov' => 'whois.nic.gov',       'gr'  => 'whois.ripe.net',
+    'hr'  => 'whois.ripe.net',      'hu'  => 'whois.ripe.net',
+    'ie'  => 'whois.ripe.net',      'il'  => 'whois.ripe.net',
+    'is'  => 'whois.ripe.net',      'it'  => 'whois.ripe.net',
     'jp'  => 'whois.nic.ad.jp',
     'kr'  => 'whois.krnic.net',
-    'li'  => 'whois.ripe.net',
-    'lt'  => 'whois.ripe.net',
-    'lu'  => 'whois.ripe.net',
-    'lv'  => 'whois.ripe.net',
-    'ma'  => 'whois.ripe.net',
-    'md'  => 'whois.ripe.net',
-    'mil' => 'whois.nic.mil',
-    'mk'  => 'whois.ripe.net',
+    'li'  => 'whois.ripe.net',      'lt'  => 'whois.ripe.net',
+    'lu'  => 'whois.ripe.net',      'lv'  => 'whois.ripe.net',
+    'ma'  => 'whois.ripe.net',      'md'  => 'whois.ripe.net',
+    'mil' => 'whois.nic.mil',       'mk'  => 'whois.ripe.net',
     'mt'  => 'whois.ripe.net',
-    'net' => 'whois.internic.net',
-    'nl'  => 'whois.ripe.net',
-    'no'  => 'whois.norid.no',
-    'nz'  => 'whois.domainz.net.nz',
+    'net' => 'whois.internic.net',  'nl'  => 'whois.ripe.net',
+    'no'  => 'whois.norid.no',      'nz'  => 'whois.domainz.net.nz',
     'org' => 'whois.internic.net',
-    'pl'  => 'whois.ripe.net',
-    'pt'  => 'whois.ripe.net',
-    'ro'  => 'whois.ripe.net',
-    'ru'  => 'whois.ripe.net',
-    'se'  => 'whois.ripe.net',
-    'sg'  => 'whois.nic.net.sg',
-    'si'  => 'whois.ripe.net',
-    'sk'  => 'whois.ripe.net',
-    'sm'  => 'whois.ripe.net',
-    'su'  => 'whois.ripe.net',
-    'tn'  => 'whois.ripe.net',
-    'tr'  => 'whois.ripe.net',
+    'pl'  => 'whois.ripe.net',      'pt'  => 'whois.ripe.net',
+    'ro'  => 'whois.ripe.net',      'ru'  => 'whois.ripe.net',
+    'se'  => 'whois.ripe.net',      'sg'  => 'whois.nic.net.sg',
+    'si'  => 'whois.ripe.net',      'sk'  => 'whois.ripe.net',
+    'sm'  => 'whois.ripe.net',      'su'  => 'whois.ripe.net',
+    'tn'  => 'whois.ripe.net',      'tr'  => 'whois.ripe.net',
     'tw'  => 'whois.twnic.net',
-    'ua'  => 'whois.ripe.net',
-    'uk'  => 'whois.nic.uk',
-    'uk'  => 'whois.ripe.net',
+    'ua'  => 'whois.ripe.net',      
+
+    'uk'     => 'whois.nic.uk',     
+    'gov.uk' => 'whois.ja.net',
+    'ac.uk'  => 'whois.ja.net', 
+    'eu.com' => 'whois.centralnic.com',
+    'uk.com' => 'whois.centralnic.com',
+    'uk.net' => 'whois.centralnic.com',
+    'gb.com' => 'whois.centralnic.com',
+    'gb.net' => 'whois.centralnic.com',
+
     'us'  => 'whois.isi.edu',
     'va'  => 'whois.ripe.net',
     'yu'  => 'whois.ripe.net',
@@ -264,8 +337,14 @@ sub guess_server_details {
     my ( $Dserver, $Dparser ) =
        ( 'whois.internic.net', { %{ $self->{ _PARSERS }->{ INTERNIC } } } );
 
-    $domain =~ s/.*\.(\w+)$/$1/;
+    $domain =~ s/.*\.(\w+\.\w+)$/$1/;
     $server = $self->{ _DOMAIN_ASSOC }->{ $domain };
+
+    unless ($server) { 
+        $domain =~ s/.*\.(\w+)$/$1/;
+        $server = $self->{ _DOMAIN_ASSOC }->{ $domain };
+    }
+
     $parser = $self->{ _PARSERS }->{ $self->{ _WHOIS_PARSER }->{ $server } } if ($server);
 
     return $server ? [$server, $parser] : [$Dserver, $Dparser];
