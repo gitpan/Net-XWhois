@@ -3,8 +3,8 @@
 ## Net::XWhois 
 ## Whois Client Interface Class. 
 ##
-## $Date: 1999/04/08 13:17:35 $
-## $Revision: 0.55 $
+## $Date: 1999/10/20 22:48:09 $
+## $Revision: 0.60 $
 ## $State: Exp $
 ## $Author: root $
 ##
@@ -18,7 +18,7 @@ use IO::Socket;
 use Carp; 
 use vars qw ( $VERSION $AUTOLOAD ); 
 
-( $VERSION )  = '$Revision: 0.55 $' =~ /\s+(\d+\.\d+)\s+/; 
+( $VERSION )  = '$Revision: 0.60 $' =~ /\s+(\d+\.\d+)\s+/; 
 
 my $CACHE    = "/tmp/whois"; 
 my $EXPIRE   = 604800; 
@@ -28,7 +28,7 @@ my %PARSERS  = (
  INTERNIC => {    
   name            => 'omain Name:\s+(\S+)', 
   status          => 'omain Status:\s+(.*?)\s*\n', 
-  nameservers     => 'main servers in listed order:[\s\n]+(.*?)\n\s+(.*?)\n\n',
+  nameservers     => 'in listed order:[\s\n]+(\S+)\s.*?\n\s+(\S*?)\s.*?\n\n',
   registrant      => 'Registrant:\s*\n(.*?)\n\n',
   contact_admin   => 'nistrative Contact.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|\n\n)',
   contact_tech    => 'Technical Contact.*?\n(.*?)(?=\s*\n[^\n]+?:\s*\n|\n\n)',
@@ -38,6 +38,7 @@ my %PARSERS  = (
   contact_handles => '\((\w+\d+)\)',
   domain_handles  => '\((\S*?-DOM)\)',
   org_handles     => '\((\S*?-ORG)\)',
+  not_registered  => 'No match',
  }, 
 
  INTERNIC_CONTACT => { 
@@ -62,11 +63,24 @@ my %PARSERS  = (
 
  JAPAN => { 
   name            => '[Domain Name]\s+(\S+)',
-  nameservers     => 'Nameserver]\s(\S+)', 
-  contact_emails  => '(\S+\@\S+)',
- }
+  nameservers     => 'Name Server\]\s+(\S+)', 
+  contact_emails  => '\[Reply Mail\]\s+(\S+\@\S+)',
+ },
 
-); 
+ TAIWAN => { 
+  name            => 'omain Name:\s+(\S+)', 
+  registrant      => '^(\S+) \(\S+?DOM)',
+  contact_emails  => '(\S+\@\S+)',
+  nameservers     => 'main servers in listed order:[\s\n]+\%see\-also\s+\.(\S+?)\:',
+ },
+
+ KOREA  => {
+  name            => 'Domain Name\s+:\s+(\S+)',
+  nameservers     => 'Host Name\s+:\s+(\S+)',
+  contact_emails  => 'E\-Mail\s+:\s*(\S+\@\S+)',
+ }, 
+
+);
 
 my %ASSOC = (   
  'whois.internic.net' => [ "INTERNIC",  [ qw/com net org/ ] ],
@@ -75,12 +89,18 @@ my %ASSOC = (
  'whois.nic.ch'       => [ "RIPE_CH",   [ qw/ch/ ] ], 
  'whois.nic.uk'       => [ "INTERNIC",  [ qw/uk/ ] ], 
  'whois.nic.ad.jp'    => [ "JAPAN",     [ qw/jp/ ] ], 
+ 'whois.twnic.net'    => [ "TAIWAN",    [ qw/tw/ ] ], 
+ 'whois.krnic.net'    => [ "KOREA",     [ qw/kr/ ] ], 
  'whois.ripe.net'     => [ "RIPE",      [ 
     qw( al am at az ba be bg by ch cy cz de dk dz ee eg es fi fo fr gb 
         ge gr hr hu ie il is it li lt lu lv ma md mk mt nl no pl pt ro ru 
         se si sk sm su tn tr ua uk va yu ) ] ], 
 
 );
+
+my %ARGS = (
+    'whois.nic.ad.jp' => '/e',
+); 
 
 sub register_parser { 
 
@@ -138,8 +158,9 @@ sub new {
     my $self = {}; 
     $self->{ _PARSERS } = \%PARSERS; 
     $self->{ _ASSOC }   = \%ASSOC; 
-    $self->{ _CACHE }   = \$CACHE; 
-    $self->{ _EXPIRE }  = \$EXPIRE; 
+    $self->{ _CACHE }   = $args{Cache} || \$CACHE; 
+    $self->{ _EXPIRE }  = $args{Expire} || \$EXPIRE; 
+    $self->{ _ARGS }    = \%ARGS;
 
     bless $self, $class; 
 
@@ -196,8 +217,10 @@ sub lookup {
     }
     }
 
+    my $server = $self->{ Server }; 
+    my $args = $self->{ _ARGS }->{ $server }; 
     my $sock = _connect ( $self->{ Server } ); 
-    print $sock $self->{ Domain }, "\r\n"; 
+    print $sock $self->{ Domain }, "$args\r\n"; 
     { undef $/; $self->{  Response  } = <$sock>; }  
     undef $sock; 
 
@@ -343,6 +366,8 @@ Force XWhois to ignore the cached records.
 
 =back
 
+=back 
+
 =head1 CLASS DATA & ACCESS METHODS
 
 =over 4
@@ -424,6 +449,8 @@ directory. Setting to "undef" will disable caching.
 
  $w->register_cache ( "/some/place/else" ); 
  $w->register_cache ( undef ); 
+
+=back
 
 =head1 OBJECT METHODS
 
