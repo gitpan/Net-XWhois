@@ -3,8 +3,8 @@
 ## Net::XWhois 
 ## Whois Client Interface Class. 
 ##
-## $Date: 1999/12/11 22:42:37 $
-## $Revision: 0.62 $
+## $Date: 2000/02/06 20:28:59 $
+## $Revision: 0.64 $
 ## $State: Exp $
 ## $Author: root $
 ##
@@ -18,7 +18,7 @@ use IO::Socket;
 use Carp; 
 use vars qw ( $VERSION $AUTOLOAD ); 
 
-( $VERSION )  = '$Revision: 0.62 $' =~ /\s+(\d+\.\d+)\s+/; 
+( $VERSION )  = '$Revision: 0.64 $' =~ /\s+(\d+\.\d+)\s+/; 
 
 my $CACHE    = "/tmp/whois"; 
 my $EXPIRE   = 604800; 
@@ -90,26 +90,31 @@ my %PARSERS  = (
 
 my %ASSOC = (   
  'whois.internic.net'   => [ "INTERNIC",  [ qw/com net org/ ] ],
- 'whois.nic.net.sg'     => [ "RIPE",      [ qw/sg/ ] ],
- 'whois.aunic.net'      => [ "RIPE",      [ qw/au/ ] ],  
- 'whois.nic.ch'         => [ "RIPE_CH",   [ qw/ch/ ] ], 
- 'whois.nic.uk'         => [ "INTERNIC",  [ qw/uk/ ] ], 
- 'whois.nic.ad.jp'      => [ "JAPAN",     [ qw/jp/ ] ], 
- 'whois.twnic.net'      => [ "TAIWAN",    [ qw/tw/ ] ], 
- 'whois.krnic.net'      => [ "KOREA",     [ qw/kr/ ] ], 
- 'whois.domainz.net.nz' => [ "GENERIC",   [ qw/nz/ ] ],
+ 'whois.nic.gov'        => [ "INTERNIC",  [ qw/gov/ ] ],
+ 'whois.isi.edu'        => [ "INTERNIC",  [ qw/us/  ] ],
+ 'whois.nic.net.sg'     => [ "RIPE",      [ qw/sg/  ] ],
+ 'whois.aunic.net'      => [ "RIPE",      [ qw/au/  ] ],  
+ 'whois.nic.ch'         => [ "RIPE_CH",   [ qw/ch/  ] ], 
+ 'whois.nic.uk'         => [ "INTERNIC",  [ qw/uk/  ] ], 
+ 'whois.nic.ad.jp'      => [ "JAPAN",     [ qw/jp/  ] ], 
+ 'whois.twnic.net'      => [ "TAIWAN",    [ qw/tw/  ] ], 
+ 'whois.krnic.net'      => [ "KOREA",     [ qw/kr/  ] ], 
+ 'whois.domainz.net.nz' => [ "GENERIC",   [ qw/nz/  ] ],
+ 'cdnnet.ca'            => [ "GENERIC",   [ qw/ca/  ] ],
  'whois.ripe.net'       => [ "RIPE",      [ 
                         qw( al am at az      ma md mk mt  
                             ba be bg by      nl no        
                             ch cy cz         pl pt        
                             de dk dz         ro ru        
-                            ee eg es         se si sk sm su                       
+                            ee eg es         se si sk sm su 
                             fi fo fr         tn tr 
                             gb ge gr         ua uk
                             hr hu ie         va
                             il is it         yu
                             li lt lu lv 
                           ) ] ], 
+
+
 
 );
 
@@ -236,7 +241,9 @@ sub lookup {
     my $args = $self->{ _ARGS }->{ $server }; 
     my $sock = _connect ( $self->{ Server } ); 
     print $sock $self->{ Domain }, "$args\r\n"; 
+    my $jump = $/;
     { undef $/; $self->{  Response  } = <$sock>; }  
+    $/ = $jump;
     undef $sock;
 
     my $fw = eval { $self->forwardwhois };
