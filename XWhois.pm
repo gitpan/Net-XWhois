@@ -3,8 +3,8 @@
 ## Net::XWhois 
 ## Whois Client Interface Class. 
 ##
-## $Date: 1999/10/20 22:48:09 $
-## $Revision: 0.60 $
+## $Date: 1999/12/11 00:50:47 $
+## $Revision: 0.61 $
 ## $State: Exp $
 ## $Author: root $
 ##
@@ -18,7 +18,7 @@ use IO::Socket;
 use Carp; 
 use vars qw ( $VERSION $AUTOLOAD ); 
 
-( $VERSION )  = '$Revision: 0.60 $' =~ /\s+(\d+\.\d+)\s+/; 
+( $VERSION )  = '$Revision: 0.61 $' =~ /\s+(\d+\.\d+)\s+/; 
 
 my $CACHE    = "/tmp/whois"; 
 my $EXPIRE   = 604800; 
@@ -39,6 +39,7 @@ my %PARSERS  = (
   domain_handles  => '\((\S*?-DOM)\)',
   org_handles     => '\((\S*?-ORG)\)',
   not_registered  => 'No match',
+  forwardwhois    => 'Whois Server: (.*?)(?=\n)',
  }, 
 
  INTERNIC_CONTACT => { 
@@ -222,7 +223,13 @@ sub lookup {
     my $sock = _connect ( $self->{ Server } ); 
     print $sock $self->{ Domain }, "$args\r\n"; 
     { undef $/; $self->{  Response  } = <$sock>; }  
-    undef $sock; 
+    undef $sock;
+
+    if ( $self->forwardwhois ne "" ) { 
+        $self->{ Server } = $self->forwardwhois ();
+        $self->{ Response } = "";
+        $self->lookup(); 
+    }
 
     if ( -d $cache ) { 
         open D, "> $cache/$domain" || return; 
