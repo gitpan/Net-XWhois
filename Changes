@@ -1,0 +1,60 @@
+
+RCS file: RCS/XWhois.pm,v
+Working file: XWhois.pm
+head: 0.53
+branch:
+locks: strict
+	root: 0.53
+access list:
+symbolic names:
+keyword substitution: kv
+total revisions: 11;	selected revisions: 11
+description:
+Net::XWhois - A Whois Client Interface Class.
+----------------------------
+revision 0.53	locked by: root;
+date: 1998/12/15 21:57:24;  author: root;  state: Exp;  lines: +6 -7
+*** empty log message ***
+----------------------------
+revision 0.52
+date: 1998/12/15 21:55:26;  author: root;  state: Exp;  lines: +13 -5
+*** empty log message ***
+----------------------------
+revision 0.51
+date: 1998/12/15 21:53:18;  author: root;  state: Exp;  lines: +11 -16
+did a strict trace.
+----------------------------
+revision 0.50
+date: 1998/12/14 17:59:27;  author: root;  state: Exp;  lines: +58 -19
+doc changes.
+----------------------------
+revision 0.49
+date: 1998/12/13 20:20:06;  author: root;  state: Exp;  lines: +4 -3
+domain status method for internic domains.
+----------------------------
+revision 0.48
+date: 1998/12/12 23:30:45;  author: root;  state: Exp;  lines: +29 -16
+changes to the pod.
+----------------------------
+revision 0.47
+date: 1998/12/07 22:07:23;  author: root;  state: Exp;  lines: +3 -3
+testing $VERSION/RCS interface.
+----------------------------
+revision 0.46
+date: 1998/12/07 22:02:03;  author: root;  state: Exp;  lines: +4 -4
+changed contact_handles definition.
+----------------------------
+revision 0.45
+date: 1998/12/07 21:59:00;  author: root;  state: Exp;  lines: +58 -46
+register_cache ()
+pod entry for register_cache ()
+----------------------------
+revision 0.44
+date: 1998/12/07 19:40:54;  author: root;  state: Exp;  lines: +64 -20
+$self->personality ()
+Introduced Caching. 
+----------------------------
+revision 0.43
+date: 1998/12/06 23:19:48;  author: root;  state: Exp;
+*** empty log message ***
+=============================================================================

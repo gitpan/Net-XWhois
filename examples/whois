@@ -1,0 +1,7 @@
+#!/usr/bin/perl -I../
+
+use Net::XWhois; 
+
+my $whois = new Net::XWhois Domain => shift;
+print $whois->response;
+

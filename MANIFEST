@@ -1,0 +1,10 @@
+Changes
+ARTISTIC
+MANIFEST
+Makefile.PL
+XWhois.pm
+test.pl
+TODO
+examples/creation2
+examples/creation
+examples/whois

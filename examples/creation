@@ -1,0 +1,12 @@
+#!/usr/bin/perl -I../
+
+use Net::XWhois; 
+
+my $whois = new Net::XWhois Domain => shift,
+                            Server => 'whois.internic.net',
+                            Parser => { 
+                               creation_time => 'Record created on (\S*?)\.\n',
+                            }; 
+
+print $whois->creation_time (); 
+
