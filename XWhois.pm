@@ -3,8 +3,8 @@
 ## Net::XWhois 
 ## Whois Client Interface Class. 
 ##
-## $Date: 2000/02/06 20:28:59 $
-## $Revision: 0.64 $
+## $Date: 2000/07/09 05:37:20 $
+## $Revision: 0.67 $
 ## $State: Exp $
 ## $Author: root $
 ##
@@ -18,10 +18,12 @@ use IO::Socket;
 use Carp; 
 use vars qw ( $VERSION $AUTOLOAD ); 
 
-( $VERSION )  = '$Revision: 0.64 $' =~ /\s+(\d+\.\d+)\s+/; 
+( $VERSION )  = '$Revision: 0.67 $' =~ /\s+(\d+\.\d+)\s+/; 
 
 my $CACHE    = "/tmp/whois"; 
 my $EXPIRE   = 604800; 
+my $ERROR    = "croak"; 
+my $TIMEOUT  = 60;
 
 my %PARSERS  = ( 
 
@@ -50,6 +52,13 @@ my %PARSERS  = (
   fax             => '\(FAX\)\s+([^\n]+)\n\n\s+Re',
  }, 
 
+ CANADA  => {
+  name            => 'domain:\s+(\S+)\n',
+  nameservers     => '-Netaddress:\s+(\S+)',
+  contact_emails  => '-Mailbox:\s+(\S+\@\S+)',
+ },
+
+
  RIPE => { 
   name            => 'domain:\s+(\S+)\n', 
   nameservers     => 'nserver:\s+(\S+)', 
@@ -63,7 +72,7 @@ my %PARSERS  = (
  }, 
 
  JAPAN => { 
-  name            => '[Domain Name]\s+(\S+)',
+  name            => '\[Domain Name\]\s+(\S+)',
   nameservers     => 'Name Server\]\s+(\S+)', 
   contact_emails  => '\[Reply Mail\]\s+(\S+\@\S+)',
  },
@@ -100,7 +109,7 @@ my %ASSOC = (
  'whois.twnic.net'      => [ "TAIWAN",    [ qw/tw/  ] ], 
  'whois.krnic.net'      => [ "KOREA",     [ qw/kr/  ] ], 
  'whois.domainz.net.nz' => [ "GENERIC",   [ qw/nz/  ] ],
- 'cdnnet.ca'            => [ "GENERIC",   [ qw/ca/  ] ],
+ 'cdnnet.ca'            => [ "CANADA",    [ qw/ca/  ] ],
  'whois.ripe.net'       => [ "RIPE",      [ 
                         qw( al am at az      ma md mk mt  
                             ba be bg by      nl no        
@@ -113,14 +122,13 @@ my %ASSOC = (
                             il is it         yu
                             li lt lu lv 
                           ) ] ], 
-
-
-
 );
+
 
 my %ARGS = (
     'whois.nic.ad.jp' => '/e',
 ); 
+
 
 sub register_parser { 
 
@@ -135,6 +143,7 @@ sub register_parser {
     
 } 
 
+
 sub register_association { 
 
     my ( $self, %args ) = @_; 
@@ -143,12 +152,14 @@ sub register_association {
 
 }
 
+
 sub register_cache { 
 
     my ( $self, $cache ) = @_; 
     return ${ $self->{ _CACHE } } = $cache  if $cache;
 
 }
+
 
 sub guess_server_details { 
 
@@ -171,6 +182,7 @@ sub guess_server_details {
 
 };
 
+
 sub new { 
 
     my ( $class, %args ) = @_; 
@@ -178,8 +190,8 @@ sub new {
     my $self = {}; 
     $self->{ _PARSERS } = \%PARSERS; 
     $self->{ _ASSOC }   = \%ASSOC; 
-    $self->{ _CACHE }   = $args{Cache} || \$CACHE; 
-    $self->{ _EXPIRE }  = $args{Expire} || \$EXPIRE; 
+    $self->{ _CACHE }   = $args{Cache}   || \$CACHE; 
+    $self->{ _EXPIRE }  = $args{Expire}  || \$EXPIRE; 
     $self->{ _ARGS }    = \%ARGS;
 
     bless $self, $class; 
@@ -189,6 +201,7 @@ sub new {
     return $self; 
 
 }
+
 
 sub personality { 
 
@@ -207,6 +220,9 @@ sub personality {
         my $res = $self->guess_server_details ( $self->{ Domain } ); 
         ( undef, $self->{ Parser } ) = @$res; 
     }
+
+    $self->{ Timeout } = $TIMEOUT unless $self->{ Timeout };
+    $self->{ Error }   = $ERROR unless $self->{ Error };
 
 }
 
@@ -239,7 +255,8 @@ sub lookup {
 
     my $server = $self->{ Server }; 
     my $args = $self->{ _ARGS }->{ $server }; 
-    my $sock = _connect ( $self->{ Server } ); 
+    my $sock = $self->_connect ( $self->{ Server } ); 
+    return undef unless $sock;
     print $sock $self->{ Domain }, "$args\r\n"; 
     my $jump = $/;
     { undef $/; $self->{  Response  } = <$sock>; }  
@@ -260,6 +277,7 @@ sub lookup {
 
 }
 
+
 sub AUTOLOAD { 
 
     my $self = shift; 
@@ -277,6 +295,7 @@ sub AUTOLOAD {
 
 }
 
+
 sub response { 
 
     my $self = shift; 
@@ -284,21 +303,29 @@ sub response {
 
 }
 
+
 sub _connect {
-  
+ 
+    my $self = shift; 
     my $machine = shift; 
+    my $error = $self->{Error};
 
     my $sock = new IO::Socket::INET PeerAddr => $machine,
                                     PeerPort => 'whois',
-                                    Proto    => 'tcp'
-       or croak "Net::XWhois: Can't connect to $machine. Aborting.\n$@";
+                                    Proto    => 'tcp',
+                                    Timeout  => $self->{Timeout}
+       or &$error( "[$@]" );
 
-    $sock->autoflush;
+    $sock->autoflush if $sock;
     return $sock;
 
 }    
 
+
+sub ignore {}
+
 'True Value.';
+
 
 =head1 NAME
 
@@ -336,13 +363,14 @@ The Whois RFC (954) does not define a template for presenting server data;
 consequently there is a large variation in layout styles as well as content 
 served across servers. 
 
-To overcome this, Net::XWhois maintains another set of tables, parsing rulesets,
-for a few, popular response formats. (See L<"%PARSERS">). These parsing tables 
-contain section names (labels) together with regular expressions that I<match> 
-the corresponding section text.  The section text is accessed "via" labels
-which are available as data instance methods at runtime. By following a 
-consistent nomenclature for labels, semantically related information encoded
-in different formats can be accessed with the same methods.
+To overcome this, Net::XWhois maintains another set of tables - parsing
+rulesets - for a few, popular response formats. (See L<"%PARSERS">). These
+parsing tables contain section names (labels) together with regular
+expressions that I<match> the corresponding section text. The section text
+is accessed "via" labels which are available as data instance methods at
+runtime. By following a consistent nomenclature for labels, semantically
+related information encoded in different formats can be accessed with the
+same methods.
 
 =head1 CONSTRUCTOR 
 
@@ -359,7 +387,8 @@ class data.
 
 =item personality () 
 
-Alters an object's personality.  Takes a hash with following arguments: 
+Alters an object's personality.  Takes a hash with following arguments.
+(Note: These arguments can also be passed to the constructor).
 
 =over 8
 
@@ -381,6 +410,7 @@ Parsing Rule-set.  See L<"%PARSERS">.
    contact_emails  => 'e-mail:\s+(\S+\@\S+)', 
  }; 
 
+
 =item B<Format> 
 
 A pre-defined parser format like INTERNIC, INTERNIC_FORMAT, RIPE, 
@@ -391,6 +421,23 @@ RIPE_CH, JAPAN etc.
 =item B<Nocache>
 
 Force XWhois to ignore the cached records. 
+
+
+=item B<Error>
+
+Determines how a network connection error is handled. By default Net::XWhois
+will croak() if it can't connect to the whois server. The Error attribute
+specifies a function call name that will be invoked when a network
+connection error occurs. Possible values are croak, carp, confess (imported
+from Carp.pm) and ignore (a blank function provided by Net::XWhois). You
+can, of course, write your own function to do error handling, in which case
+you'd have to provide a fully qualified function name. Example:
+main::logerr.
+
+=item B<Timeout>
+
+Timeout value for establishing a network connection with the server. The
+default value is 60 seconds.
 
 =back
 
