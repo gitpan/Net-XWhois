@@ -19,7 +19,7 @@ use IO::Socket;
 use Carp;
 use vars qw ( $VERSION $AUTOLOAD );
 
-$VERSION     = '0.81';
+$VERSION     = '0.82';
 
 my $CACHE    = "/tmp/whois";
 my $EXPIRE   = 604800;
@@ -851,8 +851,10 @@ Vipul Ved Prakash <mail@vipul.net>
 
 Curt Powell <curt.powell@sierraridge.com>, Matt Spiers
 <matt@pavilion.net>, Richard Dice <rdice@pobox.com>, Robert Chalmers
-<robert@chalmers.com.au>, Steinar Overbeck Cook <steinar@balder.no> for
-patches, bug-reports and many cogent suggestions.
+<robert@chalmers.com.au>, Steinar Overbeck Cook <steinar@balder.no>, Steve
+Weathers <steve@domainit.com>, Robert Puettmann <rpuettmann@ipm.net>, and
+Martin H . Sluka" <martin@sluka.de> for patches, bug-reports and many
+cogent suggestions.
 
 =head1 MAILING LIST
 

@@ -5,11 +5,15 @@
 
 --------------------------------------------------------------------------
 
+0.82                                                         July 14, 2001
+
+  * Minor fixes.
+
 0.81                                                         July 13, 2001
 
   * Change the definition of TLDs to accomodate second level tlds.
   
-  * Applied a patch by Mathh Spiers <matt@pavilion.net> that supplies
+  * Applied a patch by Matt Spiers <matt@pavilion.net> that supplies
     parsers for NOMINET (whois.nic.uk), CENTRALNIC (whois.centralnic.com)
     and UKERNA (whois.ja.net).
 
@@ -24,8 +28,6 @@
 
   * Fixed a bug in contact_handles regex of INTERNIC parser. Thanks to
     Martin H . Sluka" <martin@sluka.de> for the patch.
-
-
 
 0.80                                                         July 13, 2001
 
